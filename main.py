@@ -1,32 +1,39 @@
 # import modules
 import seleniumwire.undetected_chromedriver.v2 as webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.common.exceptions import NoSuchElementException
-import time, csv
+import time, csv, re
 from sys import argv, exit
 
 # options
-txt_output_links = './csv_output/links.txt'
-csv_output_companies = './csv_output/companies.csv'
 first_list_page_url = 'http://www.yelp.com/search?find_desc=lawyer&find_loc=San+Francisco%2C+CA'
 
+use_proxy = True
 proxy = {
-        'user': 'andviktor',
-        'password': 'YqUDR2c5kZ',
-        'host': '185.228.195.247',
-        'port': '59100'
+        'user': '',
+        'password': '',
+        'host': '',
+        'port': ''
     }
+
+# output
+txt_output_links = './csv_output/links.txt'
+csv_output_companies = './csv_output/companies.csv'
 
 # function - setup webdriver
 def setup_webdriver(proxy):
 
     seleniumwire_options = {
-        'proxy': {
-            'https': 'https://'+proxy['user']+':'+proxy['password']+'@'+proxy['host']+':'+proxy['port']
-        },
         'page_load_strategy': 'eager'
     }
+
+    if(use_proxy):
+        seleniumwire_options['proxy'] = {
+            'https': 'https://'+proxy['user']+':'+proxy['password']+'@'+proxy['host']+':'+proxy['port']
+        }
 
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('--blink-settings=imagesEnabled=false')
@@ -40,7 +47,7 @@ def setup_webdriver(proxy):
     caps = DesiredCapabilities().CHROME
     caps["pageLoadStrategy"] = "eager"
     
-    #chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--headless')
 
     return(webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options, desired_capabilities=caps))
 
@@ -69,8 +76,10 @@ def get_element(driver, xpath):
 
 # function - get company page data
 def get_company_page_data(driver, company_page_url):
+
     driver.get(company_page_url)
-    time.sleep(3)
+    wait = WebDriverWait(driver, 40)
+    wait.until(EC.presence_of_element_located((By.XPATH, '//body')))
 
     company_data = []
 
@@ -79,8 +88,15 @@ def get_company_page_data(driver, company_page_url):
     else:
         company_data.append('')
     
-    if check_exists_by_xpath(driver, '//div[contains(@class,"css-1vhakgw")][1]'):
-        company_data.append(get_element(driver, '//div[contains(@class,"css-1vhakgw")][1]').get_attribute('href'))
+    if check_exists_by_xpath(driver, '//div[contains(@class,"css-1vhakgw")]//a[contains(text(),"http")]'):
+        href = get_element(driver, '//div[contains(@class,"css-1vhakgw")]//a[contains(text(),"http")]').get_attribute('href')
+        regex = 'url=http.*?&'
+        match = re.search(regex, href)
+        href = match.group()
+        href = href[:-1]
+        href = href.replace('url=http%3A%2F%2F', '')
+        href = href.replace('url=https%3A%2F%2F', '')
+        company_data.append(href)
     else:
         company_data.append('')
     
@@ -95,7 +111,12 @@ def get_company_page_data(driver, company_page_url):
         company_data.append('')
     
     print('Collected: ' + company_data[0])
-    return(company_data)
+
+    write_csv(csv_output_companies, company_data)
+
+    driver.execute_script("window.stop();")
+
+    return company_data
 
 # function - get list page data
 def get_list_page_data(driver, list_page_url):
@@ -178,11 +199,10 @@ def main():
 
     # get all companies data
     if 'getcompanies' in argv:
+
         try:
             for company_link in read_txt(txt_output_links):
-                company_page_data = get_company_page_data(driver, company_link)
-
-                write_csv(csv_output_companies, company_page_data)
+                get_company_page_data(driver, company_link)
 
         except Exception as ex:
             print(ex)
