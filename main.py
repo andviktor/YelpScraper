@@ -3,7 +3,12 @@ import seleniumwire.undetected_chromedriver.v2 as webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.common.exceptions import NoSuchElementException
+from asyncselenium.webdriver.remote.async_webdriver import AsyncWebdriver
+from asyncselenium.webdriver.support.async_wait import AsyncWebDriverWait
+from asyncselenium.webdriver.support import async_expected_conditions as ec
 import time, csv
+import asyncio
+from aiohttp import ClientSession, ClientResponseError
 from sys import argv, exit
 
 # options
@@ -41,7 +46,6 @@ def setup_webdriver(proxy):
     caps["pageLoadStrategy"] = "eager"
     
     #chrome_options.add_argument('--headless')
-
     return(webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options, desired_capabilities=caps))
 
 # function - alert no arguments
@@ -53,7 +57,7 @@ def alert_no_argv(argv):
         exit()
 
 # function - check exists by xpath
-def check_exists_by_xpath(driver, xpath):
+async def check_exists_by_xpath(driver, xpath):
     try:
         driver.find_element(By.XPATH, xpath)
     except NoSuchElementException:
@@ -61,16 +65,16 @@ def check_exists_by_xpath(driver, xpath):
     return True
 
 # function - get xpath element
-def get_element(driver, xpath):
+async def get_element(driver, xpath):
     try:
         return(driver.find_element(By.XPATH, xpath))
     except:
         return(False)
 
 # function - get company page data
-def get_company_page_data(driver, company_page_url):
+async def get_company_page_data(driver, company_page_url):
     driver.get(company_page_url)
-    time.sleep(3)
+    await asyncio.sleep(3)
 
     company_data = []
 
@@ -97,6 +101,16 @@ def get_company_page_data(driver, company_page_url):
     print('Collected: ' + company_data[0])
     return(company_data)
 
+# function - get company page data (task)
+async def get_company_page_data_task(driver, company_link):
+    try:
+        company_page_data = await get_company_page_data(driver, company_link)
+        write_csv(csv_output_companies, company_page_data)
+        return True
+    except Exception as ex:
+        print(ex)
+        return False
+    
 # function - get list page data
 def get_list_page_data(driver, list_page_url):
     driver.get(list_page_url)
@@ -140,9 +154,34 @@ def write_csv(filename, data):
         return True
     except:
         return False
+    
 
-# main function
-def main():
+
+
+# function - create tasks
+async def create_tasks(loop, driver):
+    tasks = []
+    tasks_total = 0
+    tasks_completed = 0
+
+    # get all companies data
+    if 'getcompanies' in argv:
+        try:
+            for company_link in read_txt(txt_output_links):
+                task = asyncio.ensure_future(get_company_page_data_task(driver, company_link))
+                tasks.append(task)
+                tasks_total += 1
+                print(f'Tasks total: {tasks_total}')
+            
+            await asyncio.gather(*tasks)
+            # result = await asyncio.gather(*tasks)
+            # print(result)
+        
+        except Exception as ex:
+            print(ex)
+
+if __name__ == '__main__':
+    start_time = time.time()
 
     # check arguments
     alert_no_argv(argv)
@@ -176,22 +215,14 @@ def main():
         except Exception as ex:
             print(ex)
 
-    # get all companies data
-    if 'getcompanies' in argv:
-        try:
-            for company_link in read_txt(txt_output_links):
-                company_page_data = get_company_page_data(driver, company_link)
-
-                write_csv(csv_output_companies, company_page_data)
-
-        except Exception as ex:
-            print(ex)
-
+    # run loop
+    loop = asyncio.get_event_loop()
+    
+    future = asyncio.ensure_future(create_tasks(loop, driver))
+    loop.run_until_complete(future)
+    print(f'Time: {time.time() - start_time} sec.')
 
     # close webdriver
     print('Completed.')
     driver.close()
-    driver.quit()        
-
-if __name__ == '__main__':
-    main()
+    driver.quit()   
